@@ -1,4 +1,5 @@
 use crate::transport::DfuTransport;
+
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::error::Error;
 

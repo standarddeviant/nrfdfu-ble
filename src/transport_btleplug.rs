@@ -1,9 +1,9 @@
+use crate::transport::DfuTransport;
+
 use btleplug::api::{Central, CentralEvent, Characteristic, Manager as _, Peripheral as _, ScanFilter, WriteType};
 use btleplug::platform::Peripheral;
 use futures::stream::StreamExt;
 use std::error::Error;
-
-use crate::transport::DfuTransport;
 
 const DFU_CONTROL_POINT: uuid::Uuid = uuid::Uuid::from_u128(0x8EC90001_F315_4F60_9FB8_838830DAEA50);
 const DFU_PACKET: uuid::Uuid = uuid::Uuid::from_u128(0x8EC90002_F315_4F60_9FB8_838830DAEA50);
