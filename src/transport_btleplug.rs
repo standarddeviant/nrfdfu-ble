@@ -1,4 +1,3 @@
-
 use btleplug::api::{Central, CentralEvent, Characteristic, Manager as _, Peripheral as _, ScanFilter, WriteType};
 use btleplug::platform::Peripheral;
 use futures::stream::StreamExt;
@@ -49,13 +48,13 @@ async fn timeout<F: std::future::Future>(future: F) -> Result<F::Output, tokio::
     tokio::time::timeout(std::time::Duration::from_millis(500), future).await
 }
 
-pub struct NrfDfuTransport {
+pub struct DfuTransportBtleplug {
     peripheral: Peripheral,
     control_point: Characteristic,
     data_point: Characteristic,
 }
 
-impl DfuTransport for &NrfDfuTransport {
+impl DfuTransport for &DfuTransportBtleplug {
     const MTU: usize = 244;
     fn write_ctrl(&self, bytes: &[u8]) -> Result<(), Box<dyn Error>> {
         futures::executor::block_on(self.write(&self.control_point, bytes, WriteType::WithResponse))
@@ -68,7 +67,7 @@ impl DfuTransport for &NrfDfuTransport {
     }
 }
 
-impl NrfDfuTransport {
+impl DfuTransportBtleplug {
     async fn write(&self, chr: &Characteristic, bytes: &[u8], write_type: WriteType) -> Result<(), Box<dyn Error>> {
         let res = timeout(self.peripheral.write(chr, bytes, write_type)).await?;
         Ok(res?)
@@ -107,7 +106,7 @@ impl NrfDfuTransport {
         let control_point = find_characteristic_by_uuid(&peripheral, DFU_CONTROL_POINT).await?;
         let data_point = find_characteristic_by_uuid(&peripheral, DFU_PACKET).await?;
         peripheral.subscribe(&control_point).await?;
-        Ok(NrfDfuTransport {
+        Ok(DfuTransportBtleplug {
             peripheral,
             control_point,
             data_point,

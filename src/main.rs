@@ -20,7 +20,7 @@ struct Args {
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
     let (init_pkt, fw_pkt) = package::extract(&args.pkg)?;
-    let transport = &transport_btleplug::NrfDfuTransport::new(&args.name).await?;
+    let transport = &transport_btleplug::DfuTransportBtleplug::new(&args.name).await?;
 
     protocol::dfu_run(&transport, &init_pkt, &fw_pkt).await
 }
