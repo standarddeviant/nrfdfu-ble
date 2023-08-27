@@ -18,12 +18,14 @@ pub mod dfu_uuids {
     pub const BTTNLSS_WITH_BONDS: uuid::Uuid = uuid::Uuid::from_u128(0x8EC90003_F315_4F60_9FB8_838830DAEA50);
 }
 
+/// nRF DFU transport interface
 pub trait DfuTransport {
-    const MTU: usize;
-    fn mtu(&self) -> usize {
-        Self::MTU
-    }
+    /// MTU of the BLE link
+    fn mtu(&self) -> usize;
+    /// Send data to control point
     fn write_ctrl(&self, bytes: &[u8]) -> Result<(), Box<dyn Error>>;
+    /// Send data to data point
     fn write_data(&self, bytes: &[u8]) -> Result<(), Box<dyn Error>>;
+    /// Receive data from control point
     fn listen_ctrl(&self) -> Result<Vec<u8>, Box<dyn Error>>;
 }

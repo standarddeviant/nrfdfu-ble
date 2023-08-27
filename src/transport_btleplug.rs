@@ -52,7 +52,10 @@ pub struct DfuTransportBtleplug {
 }
 
 impl DfuTransport for &DfuTransportBtleplug {
-    const MTU: usize = 244;
+    fn mtu(&self) -> usize {
+        // TODO fix once btleplug supports MTU lookup
+        244
+    }
     fn write_ctrl(&self, bytes: &[u8]) -> Result<(), Box<dyn Error>> {
         futures::executor::block_on(self.write(&self.control_point, bytes, WriteType::WithResponse))
     }
@@ -80,7 +83,6 @@ impl DfuTransportBtleplug {
     }
     pub async fn new(name: &str) -> Result<Self, Box<dyn Error>> {
         let mut peripheral = find_peripheral_by_name(name).await?;
-        println!("{:?}", peripheral.properties().await?);
         peripheral.connect().await?;
         peripheral.discover_services().await?;
 
@@ -95,7 +97,6 @@ impl DfuTransportBtleplug {
             assert_eq!(res.value, [0x20, 0x01, 0x01]);
 
             peripheral = find_peripheral_by_name("DfuTarg").await?;
-            println!("{:?}", peripheral.properties().await?);
             peripheral.connect().await?;
             peripheral.discover_services().await?;
         }
