@@ -1,13 +1,10 @@
+use crate::transport::dfu_uuids::*;
 use crate::transport::DfuTransport;
 
 use btleplug::api::{Central, CentralEvent, Characteristic, Manager as _, Peripheral as _, ScanFilter, WriteType};
 use btleplug::platform::Peripheral;
 use futures::stream::StreamExt;
 use std::error::Error;
-
-const DFU_CONTROL_POINT: uuid::Uuid = uuid::Uuid::from_u128(0x8EC90001_F315_4F60_9FB8_838830DAEA50);
-const DFU_PACKET: uuid::Uuid = uuid::Uuid::from_u128(0x8EC90002_F315_4F60_9FB8_838830DAEA50);
-const BUTTONLESS_DFU_WITHOUT_BONDS: uuid::Uuid = uuid::Uuid::from_u128(0x8EC90003_F315_4F60_9FB8_838830DAEA50);
 
 async fn find_characteristic_by_uuid(
     peripheral: &Peripheral,
@@ -88,7 +85,7 @@ impl DfuTransportBtleplug {
         peripheral.discover_services().await?;
 
         // TODO find a better place for buttonless DFU
-        if let Ok(buttonless) = find_characteristic_by_uuid(&peripheral, BUTTONLESS_DFU_WITHOUT_BONDS).await {
+        if let Ok(buttonless) = find_characteristic_by_uuid(&peripheral, BTTNLSS).await {
             peripheral.subscribe(&buttonless).await?;
             let mut notifications = peripheral.notifications().await.unwrap();
             peripheral
@@ -103,8 +100,8 @@ impl DfuTransportBtleplug {
             peripheral.discover_services().await?;
         }
 
-        let control_point = find_characteristic_by_uuid(&peripheral, DFU_CONTROL_POINT).await?;
-        let data_point = find_characteristic_by_uuid(&peripheral, DFU_PACKET).await?;
+        let control_point = find_characteristic_by_uuid(&peripheral, CTRL_PT).await?;
+        let data_point = find_characteristic_by_uuid(&peripheral, DATA_PT).await?;
         peripheral.subscribe(&control_point).await?;
         Ok(DfuTransportBtleplug {
             peripheral,
