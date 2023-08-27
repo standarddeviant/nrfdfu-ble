@@ -40,15 +40,8 @@ enum ResponseCode {
 #[derive(Debug)]
 enum ResponseData {
     Empty,
-    Crc {
-        offset: u32,
-        checksum: u32,
-    },
-    Select {
-        offset: u32,
-        checksum: u32,
-        max_size: u32,
-    },
+    Crc { offset: u32, checksum: u32 },
+    Select { offset: u32, checksum: u32, max_size: u32 },
 }
 
 #[derive(Debug)]
@@ -75,11 +68,7 @@ impl Response {
                 offset: u32::from_le_bytes(bytes[3..7].try_into()?),
                 checksum: u32::from_le_bytes(bytes[7..11].try_into()?),
             };
-            return Ok(Response {
-                request,
-                result,
-                data,
-            });
+            return Ok(Response { request, result, data });
         }
 
         if result == ResponseCode::Success && request == OpCode::ObjectSelect {
@@ -88,11 +77,7 @@ impl Response {
                 offset: u32::from_le_bytes(bytes[7..11].try_into()?),
                 checksum: u32::from_le_bytes(bytes[11..15].try_into()?),
             };
-            return Ok(Response {
-                request,
-                result,
-                data,
-            });
+            return Ok(Response { request, result, data });
         }
 
         Ok(Response {
@@ -168,11 +153,7 @@ fn crc32(buf: &[u8], init: u32) -> u32 {
     h.finalize()
 }
 
-pub async fn dfu_run(
-    transport: &impl DfuTransport,
-    init_pkt: &[u8],
-    fw_pkt: &[u8],
-) -> Result<(), Box<dyn Error>> {
+pub async fn dfu_run(transport: &impl DfuTransport, init_pkt: &[u8], fw_pkt: &[u8]) -> Result<(), Box<dyn Error>> {
     // TODO enable and handle packet receipt notifications
     request(transport, &Request::SetPrn(0)).await?;
     // create init pkt
