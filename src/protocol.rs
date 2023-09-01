@@ -146,7 +146,7 @@ impl Request {
 
 async fn request(transport: &impl DfuTransport, req: &Request) -> Result<Response, Box<dyn Error>> {
     for _retry in 0..3 {
-        let res_raw = transport.request_ctrl(&req.to_bytes());
+        let res_raw = transport.request_ctrl(&req.to_bytes()).await;
         match res_raw {
             Err(e) => {
                 if e.is::<tokio::time::error::Elapsed>() {
@@ -184,7 +184,7 @@ pub async fn dfu_run(transport: &impl DfuTransport, init_pkt: &[u8], fw_pkt: &[u
     let req_init = Request::Create(Object::Command, init_pkt.len().try_into()?);
     request(transport, &req_init).await?;
     // write init packet
-    transport.write_data(init_pkt)?;
+    transport.write_data(init_pkt).await?;
     // verify CRC
     let res_crc = request(transport, &Request::GetCrc).await?;
     if let ResponseData::Crc { offset, checksum } = res_crc.data {
@@ -213,8 +213,8 @@ pub async fn dfu_run(transport: &impl DfuTransport, init_pkt: &[u8], fw_pkt: &[u
         for chunk in fw_pkt.chunks(max_size as usize) {
             let req_chunk = Request::Create(Object::Data, chunk.len().try_into()?);
             request(transport, &req_chunk).await?;
-            for shard in chunk.chunks(transport.mtu()) {
-                transport.write_data(shard)?;
+            for shard in chunk.chunks(transport.mtu().await) {
+                transport.write_data(shard).await?;
                 let res_crc = request(transport, &Request::GetCrc).await?;
                 if let ResponseData::Crc { offset, checksum } = res_crc.data {
                     // TODO add progress callback

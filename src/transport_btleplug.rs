@@ -1,6 +1,7 @@
 use crate::transport::dfu_uuids::*;
 use crate::transport::DfuTransport;
 
+use async_trait::async_trait;
 use btleplug::api::{Central, CentralEvent, Characteristic, Manager as _, Peripheral as _, ScanFilter, WriteType};
 use btleplug::platform::Adapter;
 use btleplug::platform::Peripheral;
@@ -48,16 +49,17 @@ pub struct DfuTransportBtleplug {
     data_point: Characteristic,
 }
 
+#[async_trait]
 impl DfuTransport for &DfuTransportBtleplug {
-    fn mtu(&self) -> usize {
+    async fn mtu(&self) -> usize {
         // TODO fix once btleplug supports MTU lookup
         244
     }
-    fn write_data(&self, bytes: &[u8]) -> Result<(), Box<dyn Error>> {
-        futures::executor::block_on(self.write(&self.data_point, bytes, WriteType::WithoutResponse))
+    async fn write_data(&self, bytes: &[u8]) -> Result<(), Box<dyn Error>> {
+        self.write(&self.data_point, bytes, WriteType::WithoutResponse).await
     }
-    fn request_ctrl(&self, bytes: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
-        futures::executor::block_on(self.request(&self.control_point, bytes, WriteType::WithResponse))
+    async fn request_ctrl(&self, bytes: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+        self.request(&self.control_point, bytes, WriteType::WithResponse).await
     }
 }
 

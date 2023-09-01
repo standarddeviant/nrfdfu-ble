@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use std::error::Error;
 
 /// nRF DFU service & characteristic UUIDs
@@ -19,11 +20,12 @@ pub mod dfu_uuids {
 }
 
 /// nRF DFU transport interface
+#[async_trait]
 pub trait DfuTransport {
     /// MTU of the BLE link
-    fn mtu(&self) -> usize;
+    async fn mtu(&self) -> usize;
     /// Send data to data point
-    fn write_data(&self, bytes: &[u8]) -> Result<(), Box<dyn Error>>;
+    async fn write_data(&self, bytes: &[u8]) -> Result<(), Box<dyn Error>>;
     /// Exchange request with control point
-    fn request_ctrl(&self, bytes: &[u8]) -> Result<Vec<u8>, Box<dyn Error>>;
+    async fn request_ctrl(&self, bytes: &[u8]) -> Result<Vec<u8>, Box<dyn Error>>;
 }

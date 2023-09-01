@@ -4,6 +4,7 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+async-trait = "0.1.73"
 btleplug = "0.11.0"
 clap = { version = "4.4.0", features = ["derive"] }
 crc32fast = "1.3.2"
