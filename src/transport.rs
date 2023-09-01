@@ -22,10 +22,8 @@ pub mod dfu_uuids {
 pub trait DfuTransport {
     /// MTU of the BLE link
     fn mtu(&self) -> usize;
-    /// Send data to control point
-    fn write_ctrl(&self, bytes: &[u8]) -> Result<(), Box<dyn Error>>;
     /// Send data to data point
     fn write_data(&self, bytes: &[u8]) -> Result<(), Box<dyn Error>>;
-    /// Receive data from control point
-    fn listen_ctrl(&self) -> Result<Vec<u8>, Box<dyn Error>>;
+    /// Exchange request with control point
+    fn request_ctrl(&self, bytes: &[u8]) -> Result<Vec<u8>, Box<dyn Error>>;
 }

@@ -146,8 +146,7 @@ impl Request {
 
 async fn request(transport: &impl DfuTransport, req: &Request) -> Result<Response, Box<dyn Error>> {
     for _retry in 0..3 {
-        transport.write_ctrl(&req.to_bytes())?;
-        let res_raw = transport.listen_ctrl();
+        let res_raw = transport.request_ctrl(&req.to_bytes());
         match res_raw {
             Err(e) => {
                 if e.is::<tokio::time::error::Elapsed>() {

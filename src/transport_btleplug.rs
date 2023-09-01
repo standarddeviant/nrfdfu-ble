@@ -2,6 +2,7 @@ use crate::transport::dfu_uuids::*;
 use crate::transport::DfuTransport;
 
 use btleplug::api::{Central, CentralEvent, Characteristic, Manager as _, Peripheral as _, ScanFilter, WriteType};
+use btleplug::platform::Adapter;
 use btleplug::platform::Peripheral;
 use futures::stream::StreamExt;
 use std::error::Error;
@@ -10,35 +11,31 @@ async fn find_characteristic_by_uuid(
     peripheral: &Peripheral,
     uuid: uuid::Uuid,
 ) -> Result<Characteristic, Box<dyn Error>> {
-    peripheral
-        .characteristics()
-        .iter()
-        .find(|s| s.uuid == uuid)
-        .ok_or("characteristic not found".into())
-        .cloned()
+    for char in peripheral.characteristics() {
+        if uuid == char.uuid {
+            return Ok(char);
+        }
+    }
+    Err("characteristic not found".into())
 }
 
-async fn find_peripheral_by_name(name: &str) -> Result<Peripheral, Box<dyn Error>> {
+async fn find_peripheral_by_name(central: &Adapter, name: &str) -> Result<Peripheral, Box<dyn Error>> {
     println!("Searching for {} ...", name);
-    let manager = btleplug::platform::Manager::new().await?;
-    let adapters = manager.adapters().await?;
-    let central = adapters.into_iter().next().unwrap();
-
-    let mut events = central.events().await?;
-
     central.start_scan(ScanFilter::default()).await?;
+    let mut events = central.events().await?;
     while let Some(event) = events.next().await {
         if let CentralEvent::DeviceDiscovered(id) = event {
             let local_name = central.peripheral(&id).await?.properties().await?.unwrap().local_name;
             if let Some(n) = local_name {
                 println!("Found [{}] at [{}]", n, id);
                 if n == name {
+                    central.stop_scan().await?;
                     return Ok(central.peripheral(&id).await?);
                 }
             }
         }
     }
-    unreachable!()
+    Err("unexpected end of stream".into())
 }
 
 async fn timeout<F: std::future::Future>(future: F) -> Result<F::Output, tokio::time::error::Elapsed> {
@@ -56,14 +53,11 @@ impl DfuTransport for &DfuTransportBtleplug {
         // TODO fix once btleplug supports MTU lookup
         244
     }
-    fn write_ctrl(&self, bytes: &[u8]) -> Result<(), Box<dyn Error>> {
-        futures::executor::block_on(self.write(&self.control_point, bytes, WriteType::WithResponse))
-    }
     fn write_data(&self, bytes: &[u8]) -> Result<(), Box<dyn Error>> {
         futures::executor::block_on(self.write(&self.data_point, bytes, WriteType::WithoutResponse))
     }
-    fn listen_ctrl(&self) -> Result<Vec<u8>, Box<dyn Error>> {
-        futures::executor::block_on(self.listen(&self.control_point))
+    fn request_ctrl(&self, bytes: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+        futures::executor::block_on(self.request(&self.control_point, bytes, WriteType::WithResponse))
     }
 }
 
@@ -72,8 +66,14 @@ impl DfuTransportBtleplug {
         let res = timeout(self.peripheral.write(chr, bytes, write_type)).await?;
         Ok(res?)
     }
-    async fn listen(&self, chr: &Characteristic) -> Result<Vec<u8>, Box<dyn Error>> {
+    async fn request(
+        &self,
+        chr: &Characteristic,
+        bytes: &[u8],
+        write_type: WriteType,
+    ) -> Result<Vec<u8>, Box<dyn Error>> {
         let mut notifications = self.peripheral.notifications().await.unwrap();
+        timeout(self.peripheral.write(chr, bytes, write_type)).await??;
         loop {
             let ntf = timeout(notifications.next()).await?.unwrap();
             if ntf.uuid == chr.uuid {
@@ -82,7 +82,11 @@ impl DfuTransportBtleplug {
         }
     }
     pub async fn new(name: &str) -> Result<Self, Box<dyn Error>> {
-        let mut peripheral = find_peripheral_by_name(name).await?;
+        let manager = btleplug::platform::Manager::new().await?;
+        let adapters = manager.adapters().await?;
+        let central = adapters.into_iter().next().unwrap();
+
+        let mut peripheral = find_peripheral_by_name(&central, name).await?;
         peripheral.connect().await?;
         peripheral.discover_services().await?;
 
@@ -90,13 +94,11 @@ impl DfuTransportBtleplug {
         if let Ok(buttonless) = find_characteristic_by_uuid(&peripheral, BTTNLSS).await {
             peripheral.subscribe(&buttonless).await?;
             let mut notifications = peripheral.notifications().await.unwrap();
-            peripheral
-                .write(&buttonless, &[0x01], WriteType::WithoutResponse)
-                .await?;
+            peripheral.write(&buttonless, &[0x01], WriteType::WithResponse).await?;
             let res = timeout(notifications.next()).await?.unwrap();
             assert_eq!(res.value, [0x20, 0x01, 0x01]);
 
-            peripheral = find_peripheral_by_name("DfuTarg").await?;
+            peripheral = find_peripheral_by_name(&central, "DfuTarg").await?;
             peripheral.connect().await?;
             peripheral.discover_services().await?;
         }
