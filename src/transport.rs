@@ -16,7 +16,7 @@ pub mod dfu_uuids {
     /// Buttonless DFU trigger without bonds Characteristic
     pub const BTTNLSS: uuid::Uuid = uuid::Uuid::from_u128(0x8EC90003_F315_4F60_9FB8_838830DAEA50);
     /// Buttonless DFU trigger with bonds Characteristic
-    pub const BTTNLSS_WITH_BONDS: uuid::Uuid = uuid::Uuid::from_u128(0x8EC90003_F315_4F60_9FB8_838830DAEA50);
+    pub const BTTNLSS_WITH_BONDS: uuid::Uuid = uuid::Uuid::from_u128(0x8EC90004_F315_4F60_9FB8_838830DAEA50);
 }
 
 /// nRF DFU transport interface
