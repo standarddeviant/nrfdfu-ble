@@ -6,7 +6,7 @@ use std::error::Error;
 // As defined in nRF5_SDK_17.1.0_ddde560/components/libraries/bootloader/dfu/nrf_dfu_req_handler.h
 
 /// DFU Object variants
-#[derive(Debug, Copy, Clone, TryFromPrimitive, IntoPrimitive)]
+#[derive(Debug, Copy, Clone, IntoPrimitive)]
 #[repr(u8)]
 enum Object {
     Command = 0x01,
@@ -47,187 +47,145 @@ enum ResponseCode {
     ExtError = 0x0B,
 }
 
-#[derive(Debug)]
-enum ResponseData {
-    Empty,
-    Crc { offset: u32, checksum: u32 },
-    Select { offset: u32, checksum: u32, max_size: u32 },
-}
-
-#[derive(Debug)]
-struct Response {
-    #[allow(dead_code)]
-    request: OpCode,
-    result: ResponseCode,
-    data: ResponseData,
-}
-
-impl Response {
-    const HEADER: u8 = 0x60;
-
-    fn failed(&self) -> bool {
-        self.result != ResponseCode::Success
-    }
-
-    fn try_from(bytes: &[u8]) -> Result<Self, Box<dyn Error>> {
-        if bytes[0] != Self::HEADER {
-            return Err("Response packets must start with 0x60".into());
-        }
-        let request = OpCode::try_from(bytes[1])?;
-        let result = ResponseCode::try_from(bytes[2])?;
-        if result == ResponseCode::Success && request == OpCode::CrcGet {
-            let data = ResponseData::Crc {
-                offset: u32::from_le_bytes(bytes[3..7].try_into()?),
-                checksum: u32::from_le_bytes(bytes[7..11].try_into()?),
-            };
-            return Ok(Response { request, result, data });
-        }
-
-        if result == ResponseCode::Success && request == OpCode::ObjectSelect {
-            let data = ResponseData::Select {
-                max_size: u32::from_le_bytes(bytes[3..7].try_into()?),
-                offset: u32::from_le_bytes(bytes[7..11].try_into()?),
-                checksum: u32::from_le_bytes(bytes[11..15].try_into()?),
-            };
-            return Ok(Response { request, result, data });
-        }
-
-        Ok(Response {
-            request,
-            result,
-            data: ResponseData::Empty,
-        })
-    }
-}
-
-/// DFU Requests
-///
-/// More requests are available when `NRF_DFU_PROTOCOL_REDUCED` is not defined
-/// in `nRF5_SDK_17.1.0_ddde560/components/libraries/bootloader/dfu/nrf_dfu_req_handler.c`
-#[derive(Debug)]
-enum Request {
-    /// Create DFU object
-    Create(Object, u32),
-    /// Set Packet Receipt Notification frequency
-    SetPrn(u32),
-    /// Get current CRC
-    GetCrc,
-    /// Execute current DFU object
-    Execute,
-    /// Select object
-    Select(Object),
-    // TODO consider adding Request::Write
-}
-
-impl Request {
-    // TODO use something better than Vec<u8>, maybe https://crates.io/crates/bytes
-    fn to_bytes(&self) -> Vec<u8> {
-        let mut bytes: Vec<u8> = vec![];
-        match self {
-            Request::Create(obj_type, len) => {
-                bytes.push(OpCode::ObjectCreate.into());
-                bytes.push((*obj_type).into());
-                bytes.extend_from_slice(&len.to_le_bytes());
-            }
-            Request::SetPrn(value) => {
-                bytes.push(OpCode::ReceiptNotifSet.into());
-                bytes.extend_from_slice(&value.to_le_bytes());
-            }
-            Request::GetCrc => bytes.push(OpCode::CrcGet.into()),
-            Request::Execute => bytes.push(OpCode::ObjectExecute.into()),
-            Request::Select(obj_type) => {
-                bytes.push(OpCode::ObjectSelect.into());
-                bytes.push((*obj_type).into());
-            }
-        }
-        bytes
-    }
-}
-
-async fn request(transport: &impl DfuTransport, req: &Request) -> Result<Response, Box<dyn Error>> {
-    for _retry in 0..3 {
-        let res_raw = transport.request_ctrl(&req.to_bytes()).await;
-        match res_raw {
-            Err(e) => {
-                if e.is::<tokio::time::error::Elapsed>() {
-                    // response timed out, retry
-                    continue;
-                } else {
-                    return Err(e);
-                }
-            }
-            Ok(r) => {
-                let res = Response::try_from(&r)?;
-                if res.failed() {
-                    return Err(format!("{:?}", res).into());
-                }
-                return Ok(res);
-            }
-        }
-    }
-    Err("No response after multiple tries".into())
-}
-
 fn crc32(buf: &[u8], init: u32) -> u32 {
     let mut h = crc32fast::Hasher::new_with_initial(init);
     h.update(buf);
     h.finalize()
 }
 
+// More requests are available when `NRF_DFU_PROTOCOL_REDUCED` is not defined
+// in `nRF5_SDK_17.1.0_ddde560/components/libraries/bootloader/dfu/nrf_dfu_req_handler.c`
+struct DfuTarget<'a, T: DfuTransport> {
+    transport: &'a T,
+}
+
+impl<'a, T: DfuTransport> DfuTarget<'a, T> {
+    fn verify_header(opcode: u8, bytes: &[u8]) -> Result<(), Box<dyn Error>> {
+        if bytes.len() < 3 {
+            return Err("invalid response length".into());
+        }
+        if bytes[0] != 0x60 {
+            return Err("invalid response header".into());
+        }
+        if bytes[1] != opcode {
+            return Err("invalid response opcode".into());
+        }
+        let result = ResponseCode::try_from(bytes[2])?;
+        if result != ResponseCode::Success {
+            return Err(format!("{:?}", result).into());
+        }
+        Ok(())
+    }
+
+    async fn write_data(&self, bytes: &[u8]) -> Result<(), Box<dyn Error>> {
+        self.transport.write_data(bytes).await
+    }
+
+    async fn request_ctrl(&self, bytes: &[u8]) -> Result<Vec<u8>, Box<dyn Error>> {
+        for _retry in 0..3 {
+            match self.transport.request_ctrl(bytes).await {
+                Err(e) => {
+                    if e.is::<tokio::time::error::Elapsed>() {
+                        // response timed out, retry
+                        continue;
+                    } else {
+                        return Err(e);
+                    }
+                }
+                Ok(r) => {
+                    return Ok(r);
+                }
+            }
+        }
+        Err("No response after multiple tries".into())
+    }
+
+    async fn set_prn(&self, value: u32) -> Result<(), Box<dyn Error>> {
+        let opcode: u8 = OpCode::ReceiptNotifSet.into();
+        let mut payload: Vec<u8> = vec![opcode];
+        payload.extend_from_slice(&value.to_le_bytes());
+        let response = self.request_ctrl(&payload).await?;
+        Self::verify_header(opcode, &response)?;
+        Ok(())
+    }
+
+    async fn get_crc(&self) -> Result<(usize, u32), Box<dyn Error>> {
+        let opcode: u8 = OpCode::CrcGet.into();
+        let response = self.request_ctrl(&[opcode]).await?;
+        Self::verify_header(opcode, &response)?;
+        let offset = u32::from_le_bytes(response[3..7].try_into()?);
+        let checksum = u32::from_le_bytes(response[7..11].try_into()?);
+        Ok((offset as usize, checksum))
+    }
+
+    async fn select_object(&self, obj_type: Object) -> Result<(usize, usize, u32), Box<dyn Error>> {
+        let opcode: u8 = OpCode::ObjectSelect.into();
+        let arg: u8 = obj_type.into();
+        let response = self.request_ctrl(&[opcode, arg]).await?;
+        Self::verify_header(opcode, &response)?;
+        let max_size = u32::from_le_bytes(response[3..7].try_into()?);
+        let offset = u32::from_le_bytes(response[7..11].try_into()?);
+        let checksum = u32::from_le_bytes(response[11..15].try_into()?);
+        Ok((max_size as usize, offset as usize, checksum))
+    }
+
+    async fn create_object(&self, obj_type: Object, len: usize) -> Result<(), Box<dyn Error>> {
+        let opcode: u8 = OpCode::ObjectCreate.into();
+        let mut payload: Vec<u8> = vec![opcode, obj_type.into()];
+        payload.extend_from_slice(&(len as u32).to_le_bytes());
+        let response = self.request_ctrl(&payload).await?;
+        Self::verify_header(opcode, &response)?;
+        Ok(())
+    }
+
+    async fn execute(&self) -> Result<(), Box<dyn Error>> {
+        let opcode: u8 = OpCode::ObjectExecute.into();
+        let response = self.request_ctrl(&[opcode]).await?;
+        Self::verify_header(opcode, &response)?;
+        Ok(())
+    }
+
+    async fn verify_crc(&self, offset: usize, checksum: u32) -> Result<(), Box<dyn Error>> {
+        let (off, crc) = self.get_crc().await?;
+        if offset != off {
+            return Err("Length mismatch".into());
+        }
+        if checksum != crc {
+            return Err("CRC mismatch".into());
+        }
+        Ok(())
+    }
+}
+
 /// Run DFU procedure as specified in
 /// [DFU Protocol](https://infocenter.nordicsemi.com/topic/sdk_nrf5_v17.1.0/lib_dfu_transport_ble.html)
 pub async fn dfu_run(transport: &impl DfuTransport, init_pkt: &[u8], fw_pkt: &[u8]) -> Result<(), Box<dyn Error>> {
-    // TODO use PRN instead of polling the CRC after each write
-    // disable packet receipt notifications
-    request(transport, &Request::SetPrn(0)).await?;
-    // create init packet
-    let req_init = Request::Create(Object::Command, init_pkt.len().try_into()?);
-    request(transport, &req_init).await?;
-    // write init packet
-    transport.write_data(init_pkt).await?;
-    // verify CRC
-    let res_crc = request(transport, &Request::GetCrc).await?;
-    if let ResponseData::Crc { offset, checksum } = res_crc.data {
-        if offset as usize != init_pkt.len() {
-            return Err("Init packet write failed, length mismatch".into());
-        }
-        if checksum != crc32(init_pkt, 0) {
-            return Err("Init packet write failed, CRC mismatch".into());
-        }
-    } else {
-        return Err("Got unexpected respnse for Request::GetCrc".into());
-    }
-    request(transport, &Request::Execute).await?;
+    let target = DfuTarget { transport };
+    target.set_prn(0).await?;
 
-    let res_select = request(transport, &Request::Select(Object::Data)).await?;
-    if let ResponseData::Select {
-        offset,
-        checksum,
-        max_size,
-    } = res_select.data
-    {
-        if offset != 0 || checksum != 0 {
-            unimplemented!("DFU resumption is not supported");
-        }
-        let mut crc: u32 = 0;
-        for chunk in fw_pkt.chunks(max_size as usize) {
-            let req_chunk = Request::Create(Object::Data, chunk.len().try_into()?);
-            request(transport, &req_chunk).await?;
-            for shard in chunk.chunks(transport.mtu().await) {
-                transport.write_data(shard).await?;
-                let res_crc = request(transport, &Request::GetCrc).await?;
-                if let ResponseData::Crc { offset, checksum } = res_crc.data {
-                    // TODO add progress callback
-                    println!("Uploaded {}/{} bytes", offset, fw_pkt.len());
-                    if checksum != crc32(shard, crc) {
-                        unimplemented!("invalid CRC recovery is not supported");
-                    }
-                    crc = checksum;
-                }
-            }
-            request(transport, &Request::Execute).await?;
-        }
-        return Ok(());
+    target.create_object(Object::Command, init_pkt.len()).await?;
+    target.write_data(init_pkt).await?;
+    target.verify_crc(init_pkt.len(), crc32(init_pkt, 0)).await?;
+    target.execute().await?;
+
+    let (max_size, offset, checksum) = target.select_object(Object::Data).await?;
+    if offset != 0 || checksum != 0 {
+        unimplemented!("DFU resumption is not supported");
     }
-    unreachable!();
+    let mut checksum: u32 = 0;
+    let mut offset: usize = 0;
+    for chunk in fw_pkt.chunks(max_size) {
+        target.create_object(Object::Data, chunk.len()).await?;
+        for shard in chunk.chunks(transport.mtu().await) {
+            checksum = crc32(shard, checksum);
+            offset += shard.len();
+            target.write_data(shard).await?;
+            target.verify_crc(offset, checksum).await?;
+            // TODO add progress callback
+            println!("Uploaded {}/{} bytes", offset, fw_pkt.len());
+        }
+        target.execute().await?;
+    }
+
+    Ok(())
 }
