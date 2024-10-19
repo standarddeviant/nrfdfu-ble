@@ -1,4 +1,5 @@
 use crate::transport::DfuTransport;
+use indicatif::ProgressBar;
 
 use num_enum::{IntoPrimitive, TryFromPrimitive};
 use std::error::Error;
@@ -168,12 +169,17 @@ pub async fn dfu_run(transport: &impl DfuTransport, init_pkt: &[u8], fw_pkt: &[u
     target.verify_crc(init_pkt.len(), crc32(init_pkt, 0)).await?;
     target.execute().await?;
 
+    let pbar_len: u64 = fw_pkt.len() as u64;
+    let bar = ProgressBar::new(pbar_len);
+
     let (max_size, offset, checksum) = target.select_object(Object::Data).await?;
     if offset != 0 || checksum != 0 {
         unimplemented!("DFU resumption is not supported");
     }
     let mut checksum: u32 = 0;
     let mut offset: usize = 0;
+
+    println!("Started DFU upload of {} bytes", fw_pkt.len());
     for chunk in fw_pkt.chunks(max_size) {
         target.create_object(Object::Data, chunk.len()).await?;
         for shard in chunk.chunks(transport.mtu().await) {
@@ -182,10 +188,12 @@ pub async fn dfu_run(transport: &impl DfuTransport, init_pkt: &[u8], fw_pkt: &[u
             target.write_data(shard).await?;
             target.verify_crc(offset, checksum).await?;
             // TODO add progress callback
-            println!("Uploaded {}/{} bytes", offset, fw_pkt.len());
+            // println!("Uploaded {}/{} bytes", offset, fw_pkt.len());
+            bar.set_position(offset as u64);
         }
         target.execute().await?;
     }
 
+    println!("Finished DFU upload of {} bytes", fw_pkt.len());
     Ok(())
 }
