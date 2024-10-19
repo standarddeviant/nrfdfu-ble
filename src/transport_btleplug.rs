@@ -2,6 +2,7 @@ use crate::transport::dfu_uuids::*;
 use crate::transport::DfuTransport;
 
 use async_trait::async_trait;
+use btleplug::api::BDAddr;
 use btleplug::api::{Central, CentralEvent, Characteristic, Manager as _, Peripheral as _, ScanFilter, WriteType};
 use btleplug::platform::Adapter;
 use btleplug::platform::Peripheral;
@@ -30,6 +31,45 @@ async fn find_peripheral_by_name(central: &Adapter, name: &str) -> Result<Periph
             if let Some(n) = local_name {
                 println!("Found [{}] at [{}]", n, id);
                 if n == name {
+                    central.stop_scan().await?;
+                    return Ok(central.peripheral(&id).await?);
+                }
+            }
+        }
+    }
+    Err("unexpected end of stream".into())
+}
+
+async fn find_peripheral(central: &Adapter, in_name: &str, in_addr: Option<BDAddr>) -> Result<Peripheral, Box<dyn Error>> {
+    println!("Searching for {:?} and {:?}...", in_name, in_addr);
+    central.start_scan(ScanFilter::default()).await?;
+    let mut events = central.events().await?;
+
+    // handle string movement and deal w/ String b/c Clap talks 'String'
+    // let in_name: Option<&str> = in_name.as_deref();
+        // Some(inn) => {
+        //     let tmps = inn.clone();
+        //     Some(inn.clone().as_str())
+        // }
+        // _ => None
+    // };
+    while let Some(event) = events.next().await {
+        if let CentralEvent::DeviceDiscovered(id) = event {
+            let props = central.peripheral(&id).await?.properties().await?.unwrap();
+            let loop_addr = props.address;
+            let loop_name = props.local_name;
+
+            // let local_addr= unsafe { central.peripheral(&id).await?.properties().await? }   
+            if let Some(ina) = in_addr {
+                if ina == loop_addr {
+                    println!("Found [{:?}] at [{}]", ina, id);
+                    central.stop_scan().await?;
+                    return Ok(central.peripheral(&id).await?);
+                }
+            }
+            if let Some(loopn) = loop_name {
+                if in_name == loopn {
+                    println!("Found [{:?}] at [{}]", in_name, id);
                     central.stop_scan().await?;
                     return Ok(central.peripheral(&id).await?);
                 }
@@ -83,12 +123,12 @@ impl DfuTransportBtleplug {
             }
         }
     }
-    pub async fn new(name: &str) -> Result<Self, Box<dyn Error>> {
+    pub async fn new(name: String, addr: Option<BDAddr>) -> Result<Self, Box<dyn Error>> {
         let manager = btleplug::platform::Manager::new().await?;
         let adapters = manager.adapters().await?;
         let central = adapters.into_iter().next().unwrap();
 
-        let mut peripheral = find_peripheral_by_name(&central, name).await?;
+        let mut peripheral: Peripheral = find_peripheral(&central, name.as_str(), addr).await?;
         peripheral.connect().await?;
         peripheral.discover_services().await?;
 
@@ -100,7 +140,6 @@ impl DfuTransportBtleplug {
             let res = timeout(notifications.next()).await?.unwrap();
             assert_eq!(res.value, [0x20, 0x01, 0x01]);
 
-            peripheral = find_peripheral_by_name(&central, "DfuTarg").await?;
             peripheral.connect().await?;
             peripheral.discover_services().await?;
         }
