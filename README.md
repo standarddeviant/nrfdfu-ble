@@ -8,6 +8,30 @@ which needs a special USB device connected to the host machine to run a BLE upda
 
 ## Usage
 
+Typical use:
+- `nrfdfu-ble -a 01:23:45:67:89:AB -p ./my_dfu.zip`
+- `nrfdfu-ble -n "Dev_w_BtnlessDFU" -p ./my_dfu.zip`
+- `nrfdfu-ble -n "DfuTarg" -p ./my_dfu.zip`
+
+> NOTE!
+>
+> Be careful with the last example as `DfuTarg` is the default 
+> BLE device name when Nordic DFU projects are in DFU mode. 
+> 
+> It's easy to attempt DFU on an unintended device if multiple
+> BLE devices are in DFU mode in the same physical setting at the same time.
+
+Running `nrfdfu-ble --help` should show
 ```console
-nrfdfu-ble DfuTargetName /path/to/fw-pkg.zip
+Update firmware on nRF BLE DFU targets
+
+Usage: nrfdfu-ble.exe [OPTIONS]
+
+Options:
+  -n, --name <NAME>  BLE DFU target name [default: ]
+  -a, --addr <ADDR>  BLE Address [default: ]
+  -p, --pkg <PKG>    Firmware update package path [default: ]
+  -h, --help         Print help
+  -V, --version      Print version
 ```
+
